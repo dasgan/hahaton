@@ -28,6 +28,7 @@ const same = (a, b) => {
   return x.length === y.length && timingSafeEqual(x, y);
 };
 const publicOrder = order => ({ id: order.id, title: order.title, status: order.status, total: order.total,
+  config: order.config, scenario: order.scenario,
   createdAt: order.createdAt, photos: order.photos.map(({ name }) => name), messages: order.messages });
 const readBody = async req => {
   let body = '';
@@ -60,12 +61,12 @@ const receiveOrder = async req => {
     return { metadata, photos, uploadDir };
   } catch (error) { await rm(uploadDir, { recursive: true, force: true }); throw error; }
 };
-const page = `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PicPac · заказы</title><style>body{font:16px system-ui;background:#f5f7f3;color:#203029;margin:0}header{background:#2d6553;color:white;padding:20px 5vw}main{max-width:1050px;margin:30px auto;padding:0 20px}input,button,textarea,select{font:inherit;padding:10px;border:1px solid #cdd8d0;border-radius:9px}button{background:#2d6553;color:white;cursor:pointer}article{background:white;border-radius:16px;padding:20px;margin:14px 0}small{color:#607469}img{width:100px;height:100px;object-fit:cover;border-radius:8px;margin:5px}.row{display:flex;gap:8px;flex-wrap:wrap}textarea{width:95%;height:70px}</style><header><h1>PicPac · заказы</h1></header><main><p><button onclick="load()">Обновить заказы</button></p><div id="orders"></div></main><script>
-async function api(url,options={}){const r=await fetch(url,{...options,headers:{'Content-Type':'application/json'}});if(!r.ok)throw Error((await r.json()).error);return r.json()}
-async function load(){try{const rows=await api('/api/admin/orders');document.querySelector('#orders').replaceChildren(...(rows.length?rows.map(render):[document.createTextNode('Заказов пока нет')]))}catch(e){alert(e.message)}}
-function render(o){const a=document.createElement('article');const title=document.createElement('h2');title.textContent=o.title+' · '+o.id;const meta=document.createElement('small');meta.textContent=new Date(o.createdAt).toLocaleString('ru')+' · '+o.total+' BYN';const status=document.createElement('select');['accepted','printing','ready','shipping','delivered'].forEach(x=>{const t=document.createElement('option');t.textContent=x;t.value=x;status.append(t)});status.value=o.status;status.onchange=async()=>{await api('/api/admin/orders/'+o.id,{method:'PATCH',body:JSON.stringify({status:status.value})});load()};const pics=document.createElement('div');o.photos.forEach((p,i)=>{const im=document.createElement('img');im.src='/api/admin/orders/'+o.id+'/photos/'+i;pics.append(im)});const msg=document.createElement('div');o.messages.forEach(m=>{const p=document.createElement('p');p.textContent=(m.from==='admin'?'Оператор: ':'Клиент: ')+m.text;msg.append(p)});const input=document.createElement('textarea');input.placeholder='Ответ клиенту';const send=document.createElement('button');send.textContent='Ответить';send.onclick=async()=>{await api('/api/admin/orders/'+o.id+'/messages',{method:'POST',body:JSON.stringify({text:input.value})});load()};a.append(title,meta,status,pics,msg,input,send);return a}
-load();
-</script></html>`;
+const adminDir = path.join(import.meta.dirname, 'admin');
+const adminAssets = {
+  '/admin/': ['index.html', 'text/html; charset=utf-8'],
+  '/admin/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+  '/admin/styles.css': ['styles.css', 'text/css; charset=utf-8'],
+};
 
 http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -74,7 +75,20 @@ http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
   try {
-    if (url.pathname === '/admin' && req.method === 'GET') { res.writeHead(200, {'Content-Type':'text/html; charset=utf-8'}); res.end(page); return; }
+    if (url.pathname === '/admin' && req.method === 'GET') {
+      res.writeHead(302, { Location: '/admin/' }); res.end(); return;
+    }
+    if (req.method === 'GET' && adminAssets[url.pathname]) {
+      const [file, contentType] = adminAssets[url.pathname];
+      res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-store' });
+      res.end(await readFile(path.join(adminDir, file)));
+      return;
+    }
+    if (req.method === 'GET' && /^\/admin\/photos\/[1-6]\.jpg$/.test(url.pathname)) {
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' });
+      res.end(await readFile(path.join(adminDir, 'photos', path.basename(url.pathname))));
+      return;
+    }
     if (url.pathname === '/api/orders' && req.method === 'POST') {
       const { metadata, photos, uploadDir } = await receiveOrder(req);
       const prior = Object.values(orders).find(o => o.idempotencyKey === metadata.idempotencyKey);
