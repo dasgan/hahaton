@@ -802,6 +802,37 @@ function SettingGroup({
   );
 }
 
+function RgbSlider({ label, value, onChange }: { label: "R" | "G" | "B"; value: number; onChange: (value: number) => void }) {
+  const trackWidth = useRef(1);
+  const update = (x: number) => onChange(Math.round(clamp(x / trackWidth.current, 0, 1) * 255));
+  const endColors = label === "R" ? ["#000", "#F44"] : label === "G" ? ["#000", "#4B5"] : ["#000", "#47F"];
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+      <Text style={{ width: 14, color: colors.text, fontWeight: "600" }}>{label}</Text>
+      <View
+        accessibilityRole="adjustable"
+        accessibilityLabel={`Цвет фона, канал ${label}`}
+        accessibilityValue={{ min: 0, max: 255, now: value }}
+        style={{ flex: 1, height: 32, justifyContent: "center", touchAction: "none" } as object}
+        onLayout={(event) => { trackWidth.current = event.nativeEvent.layout.width; }}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderTerminationRequest={() => false}
+        onResponderGrant={(event) => update(event.nativeEvent.locationX)}
+        onResponderMove={(event) => update(event.nativeEvent.locationX)}
+      >
+        <LinearGradient pointerEvents="none" colors={endColors as [string, string]}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+          style={{ height: 8, borderRadius: 4 }} />
+        <View pointerEvents="none" style={{ position: "absolute", left: `${value / 255 * 100}%`, width: 18, height: 18,
+          borderRadius: 9, backgroundColor: "#fff", borderWidth: 2, borderColor: colors.accent,
+          transform: [{ translateX: -9 }] }} />
+      </View>
+      <Text style={{ width: 30, textAlign: "right", color: colors.text }}>{value}</Text>
+    </View>
+  );
+}
+
 function HoldButton({sign, change}: {sign: number; change?: (delta: number) => void}) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const repeated = useRef(false);
@@ -1411,10 +1442,15 @@ function ProductPreview({
   const ly = (scene.lightPosition.y - 0.5) * 2;
   const distance = Math.hypot(lx, ly, 0.78);
   const lightDirection = [lx / distance, ly / distance, 0.78 / distance];
-  const padSize = useRef({ width: 1, height: 1 });
-  const placeLight = (x: number, y: number) => onSceneChange({
-    lightPosition: { x: clamp(x / padSize.current.width, 0, 1), y: clamp(y / padSize.current.height, 0, 1) },
-  });
+  const lightDragStart = useRef(scene.lightPosition);
+  const lightDragPage = useRef({ x: 0, y: 0 });
+  const darkRoom = isDark(scene.backgroundColor);
+  const rgb = [1, 3, 5].map((offset) => parseInt(scene.backgroundColor.slice(offset, offset + 2), 16));
+  const setRgb = (channel: number, value: number) => {
+    const next = [...rgb];
+    next[channel] = value;
+    setBackground(`#${next.map((part) => part.toString(16).padStart(2, "0")).join("").toUpperCase()}`);
+  };
   const filterTint =
     SCENE_FILTERS.find((item) => item.id === scene.filter)?.tint ??
     "transparent";
@@ -1734,13 +1770,15 @@ function ProductPreview({
       >
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, {
           borderLeftWidth: Math.min(width * 0.12, 100), borderRightWidth: Math.min(width * 0.12, 100),
-          borderTopWidth: 40, borderBottomWidth: 62,
-          borderLeftColor: "rgba(15,29,25,0.12)", borderRightColor: "rgba(15,29,25,0.08)",
-          borderTopColor: "rgba(255,255,255,0.14)", borderBottomColor: "rgba(15,29,25,0.04)",
+          borderTopWidth: 27, borderBottomWidth: 29,
+          borderLeftColor: darkRoom ? "rgba(255,255,255,0.035)" : "rgba(15,29,25,0.07)",
+          borderRightColor: darkRoom ? "rgba(0,0,0,0.035)" : "rgba(15,29,25,0.05)",
+          borderTopColor: darkRoom ? "rgba(255,255,255,0.025)" : "rgba(255,255,255,0.10)",
+          borderBottomColor: darkRoom ? "rgba(255,255,255,0.025)" : "rgba(15,29,25,0.035)",
         }]} />
         <LinearGradient pointerEvents="none" start={{x:scene.lightPosition.x,y:scene.lightPosition.y}}
-          end={{x:scene.lightPosition.x < 0.5 ? 1 : 0,y:1}}
-          colors={[`rgba(255,252,238,${0.14 * scene.lightBrightness / 100})`, "transparent", "rgba(14,30,24,0.11)"]}
+          end={{x:1 - scene.lightPosition.x,y:1 - scene.lightPosition.y}}
+          colors={[`rgba(255,252,238,${(darkRoom ? 0.055 : 0.14) * scene.lightBrightness / 100})`, "transparent", darkRoom ? "rgba(0,0,0,0.025)" : "rgba(14,30,24,0.08)"]}
           style={StyleSheet.absoluteFill} />
         <View pointerEvents="none" style={{position:"absolute", bottom:30, alignSelf:"center", width:objectWidth * 0.83, height:12,
           borderRadius:"50%", backgroundColor:"rgba(22,33,28,0.09)", transform:[{translateX:-lx * 24}]}} />
@@ -1761,13 +1799,11 @@ function ProductPreview({
                   : [{ matrix: projected.matrix }];
               const face = plane.id === "front" || plane.id === "back";
               const spine = book && plane.id === "left";
-              const directLight = Math.max(
+              const lightDot = projected.normal.reduce(
+                (sum, component, i) => sum + component * lightDirection[i],
                 0,
-                projected.normal.reduce(
-                  (sum, component, i) => sum + component * lightDirection[i],
-                  0,
-                ),
               );
+              const directLight = (lightDot + Math.sqrt(lightDot * lightDot + 0.16)) / 2;
               const illumination =
                 (0.4 + 0.6 * directLight) * scene.lightBrightness / 100;
               return (
@@ -1844,19 +1880,6 @@ function ProductPreview({
           </View>
         </View>
         <View
-          pointerEvents="none"
-          style={[
-            styles.sceneLightMarker,
-            { left: `${3 + scene.lightPosition.x * 90}%`, top: `${3 + scene.lightPosition.y * 85}%` },
-          ]}
-        >
-          <Ionicons
-            name="sunny"
-            size={18}
-            color={isDark(scene.backgroundColor) ? "#FFE8A3" : "#B98735"}
-          />
-        </View>
-        <View
           collapsable={false}
           accessible={false}
           testID="product-gesture-surface"
@@ -1871,6 +1894,30 @@ function ProductPreview({
           }}
           {...gesture.panHandlers}
         />
+        <View
+          testID="scene-light-source"
+          onStartShouldSetResponder={() => true}
+          onMoveShouldSetResponder={() => true}
+          onResponderTerminationRequest={() => false}
+          onResponderGrant={(event) => {
+            lightDragStart.current = scene.lightPosition;
+            lightDragPage.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY };
+          }}
+          onResponderMove={(event) => onSceneChange({ lightPosition: {
+            x: clamp(lightDragStart.current.x + (event.nativeEvent.pageX - lightDragPage.current.x) / viewerSize.current.width, 0, 1),
+            y: clamp(lightDragStart.current.y + (event.nativeEvent.pageY - lightDragPage.current.y) / viewerSize.current.height, 0, 1),
+          } })}
+          style={[
+            styles.sceneLightMarker,
+            { left: `${3 + scene.lightPosition.x * 90}%`, top: `${3 + scene.lightPosition.y * 85}%` },
+          ]}
+        >
+          <Ionicons
+            name="sunny"
+            size={18}
+            color={isDark(scene.backgroundColor) ? "#FFE8A3" : "#B98735"}
+          />
+        </View>
       </View>
       {(book || multiple || postcard) && (
         <View style={styles.previewNavigation}>
@@ -1945,18 +1992,7 @@ function ProductPreview({
       {showSceneControls && (
         <View style={styles.sceneControls}>
           <Text style={styles.sceneControlsTitle}>3D-пространство</Text>
-          <Text style={styles.sceneControlLabel}>Источник света</Text>
-          <Text style={styles.settingGroupHint}>Коснитесь панели или перетащите солнце</Text>
-          <View style={{ height: 78, borderRadius: 14, backgroundColor: "#EAF1EB", overflow: "hidden", touchAction:"none" } as object}
-            onLayout={e => { padSize.current = e.nativeEvent.layout; }}
-            onStartShouldSetResponder={() => true}
-            onResponderTerminationRequest={() => false}
-            onResponderGrant={e => placeLight(e.nativeEvent.locationX, e.nativeEvent.locationY)}
-            onResponderMove={e => placeLight(e.nativeEvent.locationX, e.nativeEvent.locationY)}>
-            <View pointerEvents="none" style={{position:"absolute", left:`${scene.lightPosition.x * 94}%`, top:`${scene.lightPosition.y * 69}%`}}>
-              <Ionicons name="sunny" size={24} color={colors.accent}/>
-            </View>
-          </View>
+          <Text style={styles.sceneControlLabel}>Перетащите солнце в сцене</Text>
           <Text style={styles.sceneControlLabel}>Яркость света</Text>
           <View style={styles.stepper}>
             <HoldButton sign={-1} change={onBrightness} />
@@ -2019,6 +2055,9 @@ function ProductPreview({
               maxLength={7}
             />
           </View>
+          {(["R", "G", "B"] as const).map((label, channel) => (
+            <RgbSlider key={label} label={label} value={rgb[channel]} onChange={(value) => setRgb(channel, value)} />
+          ))}
         </View>
       )}
     </View>
@@ -4048,10 +4087,10 @@ const styles = StyleSheet.create({
   sceneLightMarker: {
     position: "absolute",
     top: 14,
-    zIndex: 2,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
+    zIndex: 3000,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: "rgba(255,255,255,0.72)",
     alignItems: "center",
     justifyContent: "center",
