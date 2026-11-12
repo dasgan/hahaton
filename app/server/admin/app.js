@@ -18,22 +18,43 @@ const samples = [
   { id:'PP-2412', client:'Ольга П.', title:'Открытка с фото', material:'Глянцевая · 300 г', due:'14:40', status:'printing', risk:false, dpi:300, prints:1, type:'postcard', img:photo[6], messages:[] },
   { id:'PP-2411', client:'Михаил В.', title:'Постер 50×70', material:'Матовая · 200 г', due:'15:30', status:'accepted', risk:true, dpi:167, prints:1, type:'poster', img:photo[7], messages:[] },
 ];
-const demoIncoming = { id:'PP-2419', client:'Ксения Г.', title:'Постер 50×70', material:'Матовая · 200 г', due:'10:50', status:'accepted', risk:true, dpi:174, prints:1, type:'poster', img:photo[6], messages:[{from:'customer',text:'Очень важно сохранить качество портрета.',at:'10:06'}] };
-const batchIds = ['PP-2416','PP-2415','PP-2414','PP-2413'];
+const posterOrder = { id:'PP-2419', client:'Ксения Г.', title:'Постер 50×70', material:'Матовая · 200 г', due:'10:50', status:'accepted', risk:true, dpi:174, prints:1, type:'poster', img:photo[6], messages:[{from:'customer',text:'Хочу напечатать этот кадр 50×70. Хватит разрешения?',at:'10:06'}] };
+
 const statusNames = { accepted:'Новый', printing:'В печати', ready:'Готов', shipping:'В доставке', delivered:'Доставлен' };
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const readState = () => { try { return JSON.parse(localStorage.getItem('picpac-pitch-demo') || '{}'); } catch { return {}; } };
 const saved = readState();
-const state = { orders: structuredClone(samples), live: [], showLive:false, selected:'PP-2418', filter:'all', search:'', incoming:!!saved.incoming, batchBuilt:!!saved.batchBuilt };
-if (state.incoming) state.orders.unshift(structuredClone(demoIncoming));
+const state = { orders: structuredClone(samples), live: [], showLive:false, selected:'PP-2419', filter:'all', search:'', batchMembers:saved.batchMembers || samples.filter(o => o.type === "print").map(o => o.id), batchBuilt:!!saved.batchBuilt };
+state.orders.unshift(structuredClone(posterOrder));
 for (const order of state.orders) {
   const previous = saved.orders?.[order.id];
   if (previous) { order.status = previous.status || order.status; order.messages = previous.messages || order.messages; order.risk = previous.risk ?? order.risk; order.dpi = previous.dpi ?? order.dpi; }
 }
 const $ = selector => document.querySelector(selector);
-const persist = () => localStorage.setItem('picpac-pitch-demo', JSON.stringify({incoming:state.incoming,batchBuilt:state.batchBuilt,orders:Object.fromEntries(state.orders.map(o=>[o.id,{status:o.status,messages:o.messages,risk:o.risk,dpi:o.dpi}]))}));
+function persist() {
+  const orders = Object.fromEntries(state.orders.map(({ id, status, messages, risk, dpi }) =>
+    [id, { status, messages, risk, dpi }]));
+  try {
+    localStorage.setItem('picpac-pitch-demo', JSON.stringify({
+      orders, batchMembers: state.batchMembers, batchBuilt: state.batchBuilt
+    }));
+  } catch {
+    // Local HTML files may have access only to session memory.
+  }
+}
 const allOrders = () => state.showLive ? [...state.live,...state.orders] : state.orders;
 const selected = () => allOrders().find(order => order.id === state.selected) || allOrders()[0];
+function batchOrders() {
+  return state.orders.filter(order =>
+    order.type === 'print' && order.material === 'Матовая · 10×15' &&
+    (state.batchBuilt ? state.batchMembers.includes(order.id) : order.status === 'accepted' && !order.risk)
+  );
+}
+function sheetCounts(orders) {
+  const separate = orders.reduce((sum, order) => sum + Math.ceil(order.prints / 4), 0);
+  const combined = Math.ceil(orders.reduce((sum, order) => sum + order.prints, 0) / 4);
+  return { separate, combined, saved: separate - combined };
+}
 let toastTimer;
 function toast(message) { const element=$('#toast'); element.textContent=message; element.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>element.classList.remove('show'),2800); }
 function markActive() { document.querySelectorAll('.nav-link').forEach(link => link.classList.toggle('active', link.hash === location.hash || (!location.hash && link.hash === '#overview'))); }
@@ -41,20 +62,26 @@ function renderMetrics() {
   const orders=allOrders();
   $('#metric-queue').textContent=orders.filter(o=>['accepted','printing'].includes(o.status)).length;
   $('#metric-risk').textContent=orders.filter(o=>o.risk && o.status==='accepted').length;
-  $('#metric-batch').textContent=state.batchBuilt?0:batchIds.length;
-  $('#metric-saving').textContent='2';
-  $('#metric-saving-caption').textContent=state.batchBuilt?'сэкономлено в демопартии':'потенциал демопартии';
+  const batch = batchOrders();
+  const sheets = sheetCounts(batch);
+  $('#metric-batch').textContent=state.batchBuilt || batch.length < 2 ? 0 : batch.length;
+  const unit = ['листов', 'лист', 'листа', 'листа', 'листа'][sheets.saved] || 'листов';
+  $('#metric-saving').textContent = `${sheets.saved} ${unit}`;
+  $('#metric-saving-caption').textContent=state.batchBuilt?'после объединения':'при объединении';
   $('#nav-count').textContent=orders.length;
   $('#queue-count').textContent=`${orders.length} заказов`;
-  $('#batch-orders').textContent=batchIds.length;
-  $('#batch-before').textContent='4'; $('#batch-after').textContent='2';
+  $('#batch-orders').textContent=batch.length;
+  $('#batch-before').textContent=sheets.separate; $('#batch-after').textContent=sheets.combined;
 }
 function renderPriorities() {
   const risk=allOrders().find(o=>o.risk && o.status==='accepted');
   const cards=[];
-  if (risk) cards.push(`<button class="priority" data-select="${escapeHtml(risk.id)}"><span class="icon">◉</span><span><strong>Проверить качество: ${escapeHtml(risk.title)}</strong><small>${escapeHtml(risk.client)} · ${risk.dpi} dpi при печати</small></span><span class="arrow">→</span></button>`);
-  if (!state.batchBuilt) cards.push('<button class="priority green" data-scroll="batch"><span class="icon">▦</span><span><strong>Собрать 4 заказа на одном материале</strong><small>2 листа вместо 4 — оценка для демо</small></span><span class="arrow">→</span></button>');
-  if (!cards.length) cards.push('<div class="priority green"><span class="icon">✓</span><span><strong>Срочных действий нет</strong><small>Очередь под контролем</small></span></div>');
+  if (risk) cards.push(`<button class="priority" data-select="${escapeHtml(risk.id)}"><span class="icon">◉</span><span><strong>${escapeHtml(risk.title)} · нужен исходник</strong><small>${escapeHtml(risk.client)} · ${risk.dpi} dpi</small></span><span class="arrow">→</span></button>`);
+  const batch = batchOrders();
+  if (!state.batchBuilt && batch.length > 1) {
+    cards.push(`<button class="priority green" data-scroll="batch"><span><strong>Собрать партию 10×15</strong><small>Матовая бумага · заказов: ${batch.length}</small></span><span class="arrow">→</span></button>`);
+  }
+  if (!cards.length) cards.push('<div class="priority green"><span class="icon">✓</span><span><strong>Срочных действий нет</strong></span></div>');
   $('#priority-list').innerHTML=cards.join('');
 }
 function orderStatus(order) {
@@ -74,20 +101,21 @@ function renderQueue() {
 function renderDetail() {
   const order=selected(); if (!order) return;
   $('#detail-id').textContent=order.id;
-  const quality=order.risk
-    ? `<div class="quality-card"><strong>◉ Проверьте снимок до печати</strong><p>При размере ${escapeHtml(order.title)} качество составит около ${order.dpi} dpi. Лучше запросить исходник, прежде чем запускать заказ.</p></div>`
-    : `<div class="quality-card ok"><strong>✓ Фото готово к печати</strong><p>Разрешение подходит для выбранного формата. Можно продолжать без дополнительного согласования.</p></div>`;
-  $('#detail-body').innerHTML=`<img class="detail-photo" src="${escapeHtml(order.img)}" alt="Фото заказа"><h3 class="detail-title">${escapeHtml(order.title)}</h3><div class="detail-meta">${escapeHtml(order.client)} · срок ${escapeHtml(order.due)}</div><div class="detail-line"><span>Материал</span><strong>${escapeHtml(order.material)}</strong></div><div class="detail-line"><span>Кол-во</span><strong>${order.prints} ${order.prints===1?'экземпляр':'отпечатка'}</strong></div><div class="detail-line"><span>Статус</span><strong>${escapeHtml(statusNames[order.status] || order.status)}</strong></div>${quality}<div class="detail-actions"><button class="outline-button" data-action="ask">${order.risk?'Запросить исходник':'Написать клиенту'}</button>${order.risk && !order.live ? '<button class="outline-button" data-action="approve">Исходник получен ✓</button>' : ''}<button class="primary-button small" data-action="advance">${order.status==='accepted'?'В печать →':'Следующий этап →'}</button></div>`;
+  const quality=order.live ? '' : order.risk
+    ? `<div class="quality-card"><strong>Низкое разрешение</strong><p>${order.dpi} dpi в выбранном формате. Запросите оригинал файла.</p></div>`
+    : `<div class="quality-card ok"><strong>Файл согласован</strong></div>`;
+  $('#detail-body').innerHTML=`<img class="detail-photo" src="${escapeHtml(order.img)}" alt="Фото заказа"><h3 class="detail-title">${escapeHtml(order.title)}</h3><div class="detail-meta">${escapeHtml(order.client)}${order.live ? '' : ' · к ' + escapeHtml(order.due)}</div><div class="detail-line"><span>Материал</span><strong>${escapeHtml(order.material)}</strong></div><div class="detail-line"><span>Кол-во</span><strong>${escapeHtml(order.prints)} шт.</strong></div><div class="detail-line"><span>Статус</span><strong>${escapeHtml(statusNames[order.status] || order.status)}</strong></div>${quality}<div class="detail-actions"><button class="outline-button" data-action="ask">${order.risk?'Запросить исходник':'Написать клиенту'}</button>${order.risk && !order.live ? '<button class="outline-button" data-action="approve">Исходник получен</button>' : ''}<button class="primary-button small" data-action="advance">${order.status==='accepted'?'В печать →':'Следующий этап →'}</button></div>`;
 }
 function renderMessages() {
   const order=selected();
   const messages=order?.messages || [];
-  $('#messages').innerHTML=messages.length?messages.map(m=>`<div class="bubble ${m.from==='admin'?'admin':''}">${escapeHtml(m.text)}<small>${m.from==='admin'?'Оператор':'Клиент'} · ${escapeHtml(m.at||'сейчас')}</small></div>`).join(''):'<div class="bubble">Пока нет сообщений. Диалог появится здесь, когда клиент или оператор напишет по заказу.</div>';
+  $('#messages').innerHTML=messages.length?messages.map(m=>`<div class="bubble ${m.from==='admin'?'admin':''}">${escapeHtml(m.text)}<small>${m.from==='admin'?'Оператор':'Клиент'} · ${escapeHtml(m.at||'сейчас')}</small></div>`).join(''):'<div class="bubble">Сообщений пока нет.</div>';
 }
 function renderSheet() {
-  $('#sheet-preview').innerHTML=batchIds.map((id,i)=>`<div class="sheet-slot" style="background-image:url('${escapeHtml(state.orders.find(o=>o.id===id)?.img || photo[i])}')"></div>`).join('');
-  $('#build-batch').textContent=state.batchBuilt?'Партия сформирована ✓':'Сформировать партию →';
-  $('#build-batch').disabled=state.batchBuilt;
+  const batch = batchOrders();
+  $('#sheet-preview').innerHTML = batch.map(order => `<div class="sheet-slot" style="background-image:url('${order.img}')"></div>`).join('');
+  $('#build-batch').textContent=state.batchBuilt?'Партия в печати':'Сформировать партию →';
+  $('#build-batch').disabled=state.batchBuilt || batch.length < 2;
 }
 function render() { renderMetrics(); renderPriorities(); renderQueue(); renderDetail(); renderMessages(); renderSheet(); markActive(); }
 async function loadLive() {
@@ -121,25 +149,27 @@ async function advance() {
   order.status=next;persist();render();toast(`Статус: ${statusNames[next]}`);
 }
 function createBatch() {
-  if (state.batchBuilt) return;
+  const batch = batchOrders();
+  if (state.batchBuilt || batch.length < 2) return;
+  state.batchMembers = batch.map(order => order.id);
   state.batchBuilt=true;
-  for (const order of state.orders) if (batchIds.includes(order.id)) order.status='printing';
-  persist();render();toast('Партия готова: 8 фото на 2 листах вместо 4');
+  for (const order of batch) order.status='printing';
+  persist();render();toast('Партия передана в печать');
 }
 document.addEventListener('click',event=>{
-  const row=event.target.closest('[data-select]'); if(row){state.selected=row.dataset.select;render();document.querySelector('#detail').scrollIntoView({behavior:'smooth',block:'nearest'});return;}
+  const row=event.target.closest('[data-select]'); if(row){if (state.selected !== row.dataset.select) $('#message-input').value='';state.selected=row.dataset.select;render();document.querySelector('#detail').scrollIntoView({behavior:'smooth',block:'nearest'});return;}
   const scroll=event.target.closest('[data-scroll]');if(scroll){document.getElementById(scroll.dataset.scroll).scrollIntoView({behavior:'smooth'});return;}
-  const action=event.target.closest('[data-action]');if(action?.dataset.action==='ask'){const o=selected();$('#message-input').value=o?.risk?`Здравствуйте! Для печати ${o.title} лучше прислать фото в исходном качестве. Можете отправить оригинальный файл без сжатия?`:'Здравствуйте! Пишем вам по заказу PicPac.';$('#message-input').focus();$('#dialog').scrollIntoView({behavior:'smooth',block:'nearest'});return;}
+  const action=event.target.closest('[data-action]');if(action?.dataset.action==='ask'){const o=selected();$('#message-input').value=o?.risk?`Здравствуйте! Пришлите, пожалуйста, оригинал фото файлом. Для этого размера у загруженного снимка низкое разрешение.`:'Здравствуйте! Пишем вам по заказу PicPac.';$('#message-input').focus();$('#dialog').scrollIntoView({behavior:'smooth',block:'nearest'});return;}
   if(action?.dataset.action==='advance') advance();
   if(action?.dataset.action==='approve'){const o=selected();if(o && !o.live){o.risk=false;o.dpi=300;persist();render();toast('Исходник получен: заказ готов к печати');}}
 });
-$('#new-order').addEventListener('click',()=>{if (!state.incoming){state.orders.unshift(structuredClone(demoIncoming));state.incoming=true;}state.selected=demoIncoming.id;persist();render();toast('Новый заказ появился в очереди');document.querySelector('#detail').scrollIntoView({behavior:'smooth',block:'nearest'});});
 $('#build-batch').addEventListener('click',createBatch);
-$('#reset-demo').addEventListener('click',()=>{localStorage.removeItem('picpac-pitch-demo');location.reload();});
-$('#toggle-live').addEventListener('click',()=>{state.showLive=!state.showLive;state.selected=state.showLive?state.live[0]?.id||'PP-2418':'PP-2418';$('#toggle-live').classList.toggle('active',state.showLive);render();});
+$('#toggle-live').addEventListener('click',()=>{$('#message-input').value='';state.showLive=!state.showLive;state.selected=state.showLive?state.live[0]?.id||'PP-2418':'PP-2418';$('#toggle-live').classList.toggle('active',state.showLive);render();});
 $('#send-message').addEventListener('click',sendMessage);
-$('#suggest-reply').addEventListener('click',()=>{const o=selected();$('#message-input').value=o?.risk?`Здравствуйте! Чтобы ${o.title} выглядел чётко, пришлите, пожалуйста, исходный файл без сжатия. После получения сразу продолжим заказ.`:`Здравствуйте! Ваш заказ «${o?.title||'PicPac'}» у нас в работе. Напишем, когда он будет готов.`;$('#message-input').focus();});
+$('#suggest-reply').addEventListener('click',()=>{const o=selected();$('#message-input').value=o?.risk?`Здравствуйте! Пришлите, пожалуйста, фото без сжатия для заказа ${o.id}.`:`Здравствуйте! Ваш заказ «${o?.title||'PicPac'}» у нас в работе. Напишем, когда он будет готов.`;$('#message-input').focus();});
 $('#search').addEventListener('input',event=>{state.search=event.target.value;renderQueue();});
 document.querySelectorAll('.filter').forEach(button=>button.addEventListener('click',()=>{state.filter=button.dataset.filter;document.querySelectorAll('.filter').forEach(b=>b.classList.toggle('active',b===button));renderQueue();}));
 window.addEventListener('hashchange',markActive);
-render();loadLive();
+$('#shift-date').textContent = new Date().toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' });
+render();
+if (location.protocol === 'http:' || location.protocol === 'https:') loadLive();

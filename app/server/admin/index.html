@@ -10,41 +10,44 @@
   <div class="app-shell">
     <aside class="sidebar">
       <a class="brand" href="#overview" aria-label="PicPac — обзор"><span class="brand-mark">P</span><span>PicPac <small>STUDIO</small></span></a>
-      <div class="workspace-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+
       <nav aria-label="Разделы">
         <a class="nav-link active" href="#overview"><span>◫</span> Обзор</a>
         <a class="nav-link" href="#queue"><span>☷</span> Очередь <b id="nav-count">0</b></a>
         <a class="nav-link" href="#batch"><span>▦</span> Партии печати</a>
         <a class="nav-link" href="#dialog"><span>◌</span> Связь с клиентом</a>
       </nav>
-      <div class="sidebar-bottom">
-        <div class="online-dot"></div><div><strong>Смена активна</strong><small>Локальная демоверсия</small></div>
-      </div>
+
     </aside>
     <div class="main-area">
-      <header class="topbar"><span>Типография / Рабочая смена</span><div class="top-actions"><button id="toggle-live" class="reset-button" hidden>Заказы из приложения</button><button id="reset-demo" class="reset-button" title="Вернуть демонстрацию к началу">↺ Сбросить демо</button><span class="demo-pill">● ДЕМО РЕЖИМ</span><span class="avatar">PP</span></div></header>
+      <header class="topbar">
+        <h1>Рабочая смена</h1>
+        <div class="top-actions">
+          <button id="toggle-live" class="reset-button" hidden>Заказы из приложения</button>
+          <time id="shift-date"></time>
+        </div>
+      </header>
       <main id="overview">
-        <section class="heading-row"><div><p class="eyebrow">ПАНЕЛЬ ПРОИЗВОДСТВА</p><h1>Всё важное — на одном экране.</h1><p class="subhead">Заказы, качество снимков и загрузка печати. Следующий шаг всегда на виду.</p></div><button id="new-order" class="primary-button">＋ Показать новый заказ</button></section>
         <section class="metrics" aria-label="Показатели смены">
-          <div class="metric"><span>В очереди</span><strong id="metric-queue">0</strong><small>активных заказов</small></div>
-          <div class="metric"><span>Нужна проверка</span><strong id="metric-risk">0</strong><small>до запуска в печать</small></div>
-          <div class="metric"><span>Можно объединить</span><strong id="metric-batch">0</strong><small>заказов в одной партии</small></div>
-          <div class="metric metric-accent"><span>Экономия листов</span><strong id="metric-saving">0</strong><small id="metric-saving-caption">потенциал демопартии</small></div>
+          <div class="metric"><span>В работе</span><strong id="metric-queue">0</strong></div>
+          <div class="metric"><span>Нужна проверка</span><strong id="metric-risk">0</strong></div>
+          <div class="metric"><span>Можно объединить</span><strong id="metric-batch">0</strong></div>
+          <div class="metric metric-accent"><span>Экономия бумаги</span><strong id="metric-saving">0</strong><small id="metric-saving-caption">листа по раскладке</small></div>
         </section>
         <section class="main-grid">
           <div class="left-column">
-            <div class="section-head"><div><p class="eyebrow">ПРИОРИТЕТЫ</p><h2>Что сделать сейчас</h2></div><span class="section-hint">Обновляется вместе с очередью</span></div>
+            <div class="section-head"><h2>Задачи смены</h2></div>
             <div id="priority-list" class="priority-list"></div>
             <section id="queue" class="panel queue-panel">
-              <div class="panel-head"><div><p class="eyebrow">ЗАКАЗЫ</p><h2>Очередь смены</h2></div><span id="queue-count" class="count-pill"></span></div>
+              <div class="panel-head"><div><h2>Заказы</h2></div><span id="queue-count" class="count-pill"></span></div>
               <div class="queue-toolbar"><label class="search-wrap"><span>⌕</span><input id="search" type="search" placeholder="Найти заказ или клиента" aria-label="Найти заказ или клиента"></label><div class="filters" role="group" aria-label="Фильтр заказов"><button class="filter active" data-filter="all">Все</button><button class="filter" data-filter="risk">Проверить</button><button class="filter" data-filter="ready">К печати</button></div></div>
               <div class="table-wrap"><table><thead><tr><th>ЗАКАЗ</th><th>МАТЕРИАЛ</th><th>СРОК</th><th>СОСТОЯНИЕ</th><th></th></tr></thead><tbody id="order-rows"></tbody></table></div>
             </section>
-            <section id="batch" class="batch-panel"><div class="batch-copy"><p class="eyebrow">УМНАЯ ПАРТИЯ</p><h2>Одинаковая бумага — одна подготовка</h2><p>Четыре заказа 10×15 на матовой бумаге. Система собирает их в один запуск и показывает раскладку до печати.</p><div class="batch-stats"><span><strong id="batch-orders">4</strong> заказа</span><span><strong id="batch-before">4</strong> листа отдельно</span><span><strong id="batch-after">2</strong> листа вместе</span></div><button id="build-batch" class="light-button">Посмотреть партию →</button></div><div id="sheet-preview" class="sheet-preview" aria-label="Раскладка печатного листа"></div></section>
+            <section id="batch" class="batch-panel"><div class="batch-copy"><h2>Партия 10×15</h2><p>Матовая бумага · 4 отпечатка на лист</p><div class="batch-stats"><span>Заказов<strong id="batch-orders">4</strong></span><span>Листов отдельно<strong id="batch-before">4</strong></span><span>Листов вместе<strong id="batch-after">2</strong></span></div><button id="build-batch" class="light-button">Посмотреть партию →</button></div><div id="sheet-preview" class="sheet-preview" aria-label="Раскладка печатного листа"></div></section>
           </div>
           <aside class="right-column">
-            <section class="detail-panel" id="detail"><div class="detail-top"><p class="eyebrow">КАРТОЧКА ЗАКАЗА</p><span id="detail-id" class="detail-id"></span></div><div id="detail-body"></div></section>
-            <section id="dialog" class="dialog-panel"><div class="panel-head"><div><p class="eyebrow">КАНАЛ СВЯЗИ</p><h2>Диалог по заказу</h2></div><span class="online-label"><i></i> на связи</span></div><div id="messages" class="messages"></div><div class="composer"><textarea id="message-input" placeholder="Напишите клиенту…" aria-label="Сообщение клиенту"></textarea><div class="composer-actions"><button id="suggest-reply" class="quiet-button">✦ Предложить ответ</button><button id="send-message" class="primary-button small">Отправить ↗</button></div></div></section>
+            <section class="detail-panel" id="detail"><div class="detail-top"><p class="eyebrow">Заказ</p><span id="detail-id" class="detail-id"></span></div><div id="detail-body"></div></section>
+            <section id="dialog" class="dialog-panel"><div class="panel-head"><div><h2>Переписка</h2></div></div><div id="messages" class="messages"></div><div class="composer"><textarea id="message-input" placeholder="Напишите клиенту…" aria-label="Сообщение клиенту"></textarea><div class="composer-actions"><button id="suggest-reply" class="quiet-button">Шаблон ответа</button><button id="send-message" class="primary-button small">Отправить</button></div></div></section>
           </aside>
         </section>
       </main>
