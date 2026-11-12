@@ -9,8 +9,6 @@ import Busboy from 'busboy';
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
 const dataDir = path.resolve(process.env.DATA_DIR || './data');
-const adminToken = process.env.ADMIN_TOKEN;
-if (!adminToken) throw new Error('Set ADMIN_TOKEN before starting the server');
 await mkdir(dataDir, { recursive: true });
 const filePath = path.join(dataDir, 'orders.json');
 let orders = {};
@@ -29,7 +27,6 @@ const same = (a, b) => {
   const x = Buffer.from(a); const y = Buffer.from(b);
   return x.length === y.length && timingSafeEqual(x, y);
 };
-const isAdmin = req => same(req.headers['x-admin-token'], adminToken);
 const publicOrder = order => ({ id: order.id, title: order.title, status: order.status, total: order.total,
   createdAt: order.createdAt, photos: order.photos.map(({ name }) => name), messages: order.messages });
 const readBody = async req => {
@@ -63,11 +60,11 @@ const receiveOrder = async req => {
     return { metadata, photos, uploadDir };
   } catch (error) { await rm(uploadDir, { recursive: true, force: true }); throw error; }
 };
-const page = `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PicPac · заказы</title><style>body{font:16px system-ui;background:#f5f7f3;color:#203029;margin:0}header{background:#2d6553;color:white;padding:20px 5vw}main{max-width:1050px;margin:30px auto;padding:0 20px}input,button,textarea,select{font:inherit;padding:10px;border:1px solid #cdd8d0;border-radius:9px}button{background:#2d6553;color:white;cursor:pointer}article{background:white;border-radius:16px;padding:20px;margin:14px 0}small{color:#607469}img{width:100px;height:100px;object-fit:cover;border-radius:8px;margin:5px}.row{display:flex;gap:8px;flex-wrap:wrap}textarea{width:95%;height:70px}</style><header><h1>PicPac · заказы</h1></header><main><p><input id="token" type="password" placeholder="Ключ администратора"><button onclick="load()">Открыть</button></p><div id="orders"></div></main><script>
-const key=()=>document.querySelector('#token').value;
-async function api(url,options={}){const r=await fetch(url,{...options,headers:{'Content-Type':'application/json','x-admin-token':key()}});if(!r.ok)throw Error((await r.json()).error);return r.json()}
-async function load(){try{const rows=await api('/api/admin/orders');document.querySelector('#orders').replaceChildren(...rows.map(render))}catch(e){alert(e.message)}}
-function render(o){const a=document.createElement('article');const title=document.createElement('h2');title.textContent=o.title+' · '+o.id;const meta=document.createElement('small');meta.textContent=new Date(o.createdAt).toLocaleString('ru')+' · '+o.total+' BYN';const status=document.createElement('select');['accepted','printing','ready','shipping','delivered'].forEach(x=>{const t=document.createElement('option');t.textContent=x;t.value=x;status.append(t)});status.value=o.status;status.onchange=async()=>{await api('/api/admin/orders/'+o.id,{method:'PATCH',body:JSON.stringify({status:status.value})});load()};const pics=document.createElement('div');o.photos.forEach((p,i)=>{const im=document.createElement('img');im.src='/api/admin/orders/'+o.id+'/photos/'+i+'?token='+encodeURIComponent(key());pics.append(im)});const msg=document.createElement('div');o.messages.forEach(m=>{const p=document.createElement('p');p.textContent=(m.from==='admin'?'Оператор: ':'Клиент: ')+m.text;msg.append(p)});const input=document.createElement('textarea');input.placeholder='Ответ клиенту';const send=document.createElement('button');send.textContent='Ответить';send.onclick=async()=>{await api('/api/admin/orders/'+o.id+'/messages',{method:'POST',body:JSON.stringify({text:input.value})});load()};a.append(title,meta,status,pics,msg,input,send);return a}
+const page = `<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PicPac · заказы</title><style>body{font:16px system-ui;background:#f5f7f3;color:#203029;margin:0}header{background:#2d6553;color:white;padding:20px 5vw}main{max-width:1050px;margin:30px auto;padding:0 20px}input,button,textarea,select{font:inherit;padding:10px;border:1px solid #cdd8d0;border-radius:9px}button{background:#2d6553;color:white;cursor:pointer}article{background:white;border-radius:16px;padding:20px;margin:14px 0}small{color:#607469}img{width:100px;height:100px;object-fit:cover;border-radius:8px;margin:5px}.row{display:flex;gap:8px;flex-wrap:wrap}textarea{width:95%;height:70px}</style><header><h1>PicPac · заказы</h1></header><main><p><button onclick="load()">Обновить заказы</button></p><div id="orders"></div></main><script>
+async function api(url,options={}){const r=await fetch(url,{...options,headers:{'Content-Type':'application/json'}});if(!r.ok)throw Error((await r.json()).error);return r.json()}
+async function load(){try{const rows=await api('/api/admin/orders');document.querySelector('#orders').replaceChildren(...(rows.length?rows.map(render):[document.createTextNode('Заказов пока нет')]))}catch(e){alert(e.message)}}
+function render(o){const a=document.createElement('article');const title=document.createElement('h2');title.textContent=o.title+' · '+o.id;const meta=document.createElement('small');meta.textContent=new Date(o.createdAt).toLocaleString('ru')+' · '+o.total+' BYN';const status=document.createElement('select');['accepted','printing','ready','shipping','delivered'].forEach(x=>{const t=document.createElement('option');t.textContent=x;t.value=x;status.append(t)});status.value=o.status;status.onchange=async()=>{await api('/api/admin/orders/'+o.id,{method:'PATCH',body:JSON.stringify({status:status.value})});load()};const pics=document.createElement('div');o.photos.forEach((p,i)=>{const im=document.createElement('img');im.src='/api/admin/orders/'+o.id+'/photos/'+i;pics.append(im)});const msg=document.createElement('div');o.messages.forEach(m=>{const p=document.createElement('p');p.textContent=(m.from==='admin'?'Оператор: ':'Клиент: ')+m.text;msg.append(p)});const input=document.createElement('textarea');input.placeholder='Ответ клиенту';const send=document.createElement('button');send.textContent='Ответить';send.onclick=async()=>{await api('/api/admin/orders/'+o.id+'/messages',{method:'POST',body:JSON.stringify({text:input.value})});load()};a.append(title,meta,status,pics,msg,input,send);return a}
+load();
 </script></html>`;
 
 http.createServer(async (req, res) => {
@@ -89,7 +86,6 @@ http.createServer(async (req, res) => {
       orders[id] = order; await save(); json(res, 201, { ...publicOrder(order), token }); return;
     }
     if (url.pathname === '/api/admin/orders' && req.method === 'GET') {
-      if (!isAdmin(req)) return json(res, 401, { error:'Unauthorized' });
       return json(res, 200, Object.values(orders).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(publicOrder));
     }
     const match = url.pathname.match(/^\/api\/(admin\/)?orders\/([^/]+)(?:\/(messages|photos)(?:\/(\d+))?)?$/);
@@ -97,7 +93,7 @@ http.createServer(async (req, res) => {
     const [, admin, id, resource, index] = match;
     const order = orders[id];
     if (!order) return json(res, 404, { error:'Order not found' });
-    if (admin ? !isAdmin(req) && !(resource === 'photos' && same(url.searchParams.get('token'), adminToken)) : !same(req.headers['x-order-token'], order.token))
+    if (!admin && !same(req.headers['x-order-token'], order.token))
       return json(res, 401, { error:'Unauthorized' });
     if (resource === 'photos' && admin && req.method === 'GET') {
       const photo = order.photos[Number(index)]; if (!photo) return json(res,404,{error:'Photo not found'});

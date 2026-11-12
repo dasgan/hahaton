@@ -3548,7 +3548,19 @@ function PicPacApp() {
             <Text style={styles.profileAvatarText}>PP</Text>
           </View>
           <Text style={styles.profileName}>Мой профиль</Text>
-          <Text style={styles.profileMeta}>Заказов: {orders.length}</Text>
+          <View style={styles.profileStats}>
+            {([
+              { label: "Заказов", value: orders.length, icon: "receipt-outline" },
+              { label: "В работе", value: orders.filter((order) => order.status !== "delivered").length, icon: "time-outline" },
+              { label: "Черновиков", value: 0, icon: "bookmark-outline" },
+            ] as const).map((stat) => (
+              <View key={stat.label} style={styles.profileStat}>
+                <Ionicons name={stat.icon} size={20} color="#C96E75" />
+                <Text style={styles.profileStatValue}>{stat.value}</Text>
+                <Text style={styles.profileStatLabel}>{stat.label}</Text>
+              </View>
+            ))}
+          </View>
         </View>
         <SectionTitle title="О приложении" />
         <Text style={styles.profileText}>
@@ -4756,6 +4768,17 @@ const styles = StyleSheet.create({
   },
   profileAvatarText: { fontWeight: "800", color: colors.accent, fontSize: 22 },
   profileName: { fontSize: 18, fontWeight: "800", color: colors.text },
-  profileMeta: { color: colors.textSecondary, marginTop: 4 },
+  profileStats: { flexDirection: "row", gap: 8, marginTop: 18, width: "100%" },
+  profileStat: {
+    flex: 1,
+    minWidth: 0,
+    backgroundColor: "#F5E1E1",
+    borderRadius: 16,
+    paddingVertical: 14,
+    alignItems: "center",
+    gap: 4,
+  },
+  profileStatValue: { fontSize: 22, fontWeight: "800", color: colors.text },
+  profileStatLabel: { fontSize: 11, color: colors.textSecondary, textAlign: "center" },
   profileText: { color: colors.textSecondary, lineHeight: 22, fontSize: 15 },
 });
