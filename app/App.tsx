@@ -40,6 +40,7 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -57,6 +58,8 @@ type BookTemplate = {
 };
 
 type MockOrder = {
+  token?: string;
+  messages?: { id: string; from: "admin" | "customer"; text: string; at: string }[];
   id: string;
   title: string;
   scenario: string;
@@ -256,42 +259,6 @@ const POSTER_SIZES: PosterSize[] = [
 ];
 
 // ——— Заказы ———
-const INITIAL_ORDERS: MockOrder[] = [
-  {
-    id: "ord-1042",
-    title: "Фотокнига Lite 25×25",
-    scenario: "Поездка в Грузию",
-    status: "printing",
-    statusIndex: 1,
-    total: 69.3,
-    previewUri: COVER_URLS[2],
-    date: "28 окт 2026",
-    items: "12 разворотов · шаблон «История путешествия»",
-  },
-  {
-    id: "ord-1031",
-    title: "Фотопечать 10×15",
-    scenario: "Семейный архив",
-    status: "delivered",
-    statusIndex: 4,
-    total: 12.35,
-    previewUri: COVER_URLS[5],
-    date: "12 сен 2026",
-    items: "19 отпечатков · матовая бумага",
-  },
-  {
-    id: "ord-1028",
-    title: "Открытка",
-    scenario: "Подарок маме",
-    status: "ready",
-    statusIndex: 2,
-    total: 23.4,
-    previewUri: COVER_URLS[14],
-    date: "5 сен 2026",
-    items: "5 открыток · стиль «Ботаника»",
-  },
-];
-
 const ORDER_STATUSES: string[] = [
   "Принят",
   "В печати",
@@ -360,7 +327,7 @@ type ProductCategory = "print" | "photobook" | "mini" | "poster" | "postcard";
 type PaperType = "matte" | "glossy";
 type PosterOrientation = "portrait" | "landscape";
 
-type Photo = { id: string; uri: string; width?: number; height?: number };
+type Photo = { id: string; uri: string; mimeType?: string; width?: number; height?: number };
 type PhotoSlot = { id: string; photoId?: string };
 
 type PrintFinish = {
@@ -2362,8 +2329,48 @@ function PicPacApp() {
     setPreviewInteracting(active);
   }, []);
 
-  const [orders, setOrders] = useState<MockOrder[]>(INITIAL_ORDERS);
+  const [orders, setOrders] = useState<MockOrder[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+
+  const [sendingOrder, setSendingOrder] = useState(false);
+  const [orderError, setOrderError] = useState("");
+  const [chatDraft, setChatDraft] = useState("");
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const requestKey = useRef<string | null>(null);
+  const apiUrl = process.env.EXPO_PUBLIC_API_URL || "http://localhost:8787";
+
+  useEffect(() => {
+    AsyncStorage.getItem("picpac.orders").then(async (saved) => {
+      if (!saved) return;
+      const entries = JSON.parse(saved) as MockOrder[];
+      const fresh = await Promise.all(entries.map(async (entry) => {
+        try {
+          const response = await fetch(`${apiUrl}/api/orders/${entry.id}`, { headers: { "X-Order-Token": entry.token || "" } });
+          if (!response.ok) return entry;
+          const remote = await response.json();
+          return { ...entry, status: remote.status, statusIndex: ["accepted", "printing", "ready", "shipping", "delivered"].indexOf(remote.status), messages: remote.messages };
+        } catch { return entry; }
+      }));
+      setOrders(fresh);
+    }).catch(() => {});
+  }, [apiUrl]);
+
+  useEffect(() => {
+    if (!selectedOrderId) return;
+    const refresh = async () => {
+      const selected = orders.find((item) => item.id === selectedOrderId);
+      if (!selected?.token) return;
+      try {
+        const response = await fetch(`${apiUrl}/api/orders/${selected.id}`, { headers: { "X-Order-Token": selected.token } });
+        if (!response.ok) return;
+        const remote = await response.json();
+        setOrders((current) => current.map((item) => item.id === selected.id ? { ...item, status: remote.status,
+          statusIndex: ["accepted", "printing", "ready", "shipping", "delivered"].indexOf(remote.status), messages: remote.messages } : item));
+      } catch { /* The existing order remains visible while offline. */ }
+    };
+    const timer = setInterval(refresh, 8000);
+    return () => clearInterval(timer);
+  }, [selectedOrderId, apiUrl, orders]);
   const [deliveryId, setDeliveryId] = useState("courier");
   const [paymentId, setPaymentId] = useState("card");
   const [promo, setPromo] = useState("");
@@ -2396,6 +2403,7 @@ function PicPacApp() {
     return result.assets.map((a) => ({
       id: makePhotoId(),
       uri: a.uri,
+      mimeType: a.mimeType,
       width: a.width,
       height: a.height,
     }));
@@ -2633,31 +2641,67 @@ function PicPacApp() {
   const selectedSlot = cfg.slots.find((s) => s.id === selectedSlotId);
   const selectedOrder = orders.find((o) => o.id === selectedOrderId);
 
-  const placeOrder = () => {
-    const newOrder: MockOrder = {
-      id: `ord-${Math.floor(Math.random() * 9000 + 1000)}`,
-      title: productTitle(cfg),
-      scenario: scenarioTitle ?? "Новый заказ",
-      status: "accepted",
-      statusIndex: 0,
-      total: totalPrice,
-      previewUri: photos[0]?.uri ?? COVER_URLS[0],
-      date: "Сегодня",
-      items: `${photos.length} фото · ${productDetails(cfg)}`,
-    };
-    setOrders((prev) => [newOrder, ...prev]);
-    setPhotos([]);
-    setScenarioTitle(undefined);
-    setPromo("");
-    setCfg(makeConfig("print", []));
-    setSelectedSlotId(null);
-    setSwapSlotId(null);
-    setSelectedOrderId(newOrder.id);
-    setScreen("orders");
-    Alert.alert(
-      "Заказ оформлен 🎉",
-      "Спасибо! Мы уже начали готовить ваш заказ. Статус можно отслеживать здесь.",
-    );
+  const placeOrder = async () => {
+    if (sendingOrder) return;
+    setSendingOrder(true);
+    setOrderError("");
+    requestKey.current ||= `${Date.now()}-${Math.random()}`;
+    try {
+      const form = new FormData();
+      form.append("order", JSON.stringify({
+        idempotencyKey: requestKey.current, title: productTitle(cfg), scenario: scenarioTitle,
+        config: cfg, total: totalPrice, delivery: deliveryId, payment: paymentId,
+      }));
+      for (const photo of photos) {
+        if (Platform.OS === "web") {
+          const file = await fetch(photo.uri).then((response) => response.blob());
+          form.append("photo", file, `${photo.id}.jpg`);
+        } else {
+          const mime = photo.mimeType || "image/jpeg";
+          form.append("photo", { uri: photo.uri, name: `${photo.id}.${mime.split("/")[1]}`, type: mime } as unknown as Blob);
+        }
+      }
+      const response = await fetch(`${apiUrl}/api/orders`, { method: "POST", body: form });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Не удалось отправить заказ");
+      const newOrder: MockOrder = {
+        id: result.id, token: result.token, messages: [], title: productTitle(cfg),
+        scenario: scenarioTitle ?? "Новый заказ", status: result.status,
+        statusIndex: 0, total: totalPrice, previewUri: photos[0]?.uri ?? COVER_URLS[0],
+        date: new Date().toLocaleDateString("ru-RU"), items: `${photos.length} фото · ${productDetails(cfg)}`,
+      };
+      const nextOrders = [newOrder, ...orders];
+      await AsyncStorage.setItem("picpac.orders", JSON.stringify(nextOrders));
+      setOrders(nextOrders);
+      requestKey.current = null;
+      setPhotos([]);
+      setScenarioTitle(undefined);
+      setPromo("");
+      setCfg(makeConfig("print", []));
+      setSelectedSlotId(null);
+      setSwapSlotId(null);
+      setSelectedOrderId(newOrder.id);
+      setScreen("orders");
+    } catch (error) {
+      setOrderError(error instanceof Error ? error.message : "Не удалось отправить заказ. Повторите попытку.");
+    } finally { setSendingOrder(false); }
+  };
+
+  const sendChatMessage = async () => {
+    if (!selectedOrder?.token || !chatDraft.trim() || sendingMessage) return;
+    setSendingMessage(true);
+    try {
+      const response = await fetch(`${apiUrl}/api/orders/${selectedOrder.id}/messages`, {
+        method: "POST", headers: { "Content-Type": "application/json", "X-Order-Token": selectedOrder.token },
+        body: JSON.stringify({ text: chatDraft.trim() }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+      setOrders((current) => current.map((item) => item.id === selectedOrder.id ? { ...item, messages: result.messages } : item));
+      setChatDraft("");
+      setOrderError("");
+    } catch (error) { setOrderError(error instanceof Error ? error.message : "Не удалось отправить сообщение"); }
+    finally { setSendingMessage(false); }
   };
 
   // ═════════════ Главная ═════════════
@@ -3383,6 +3427,7 @@ function PicPacApp() {
           <SummaryRow label="Итого" value={money(totalPrice)} strong />
         </View>
       </ScrollView>
+      {orderError ? <Text style={{ color: colors.danger, paddingHorizontal: 20 }}>{orderError}</Text> : null}
       <View
         style={[
           styles.footerBar,
@@ -3395,7 +3440,7 @@ function PicPacApp() {
           <Text style={styles.footerPriceValue}>{money(totalPrice)}</Text>
         </View>
         <View style={{ flex: 1.2 }}>
-          <PrimaryButton label="Оформить заказ" onPress={placeOrder} />
+          <PrimaryButton label={sendingOrder ? "Отправляем заказ…" : "Оформить заказ"} disabled={sendingOrder || photos.length === 0} onPress={placeOrder} />
         </View>
       </View>
     </KeyboardAvoidingView>
@@ -3426,6 +3471,21 @@ function PicPacApp() {
               <Text style={styles.checkoutLine}>Детали</Text>
               <Text style={styles.checkoutMeta}>{selectedOrder.items}</Text>
               <Text style={styles.checkoutMeta}>№ {selectedOrder.id}</Text>
+            </View>
+            <SectionTitle title="Связь с оператором" />
+            <View style={styles.card}>
+              {(selectedOrder.messages || []).map((message) => (
+                <View key={message.id} style={{ marginBottom: 10, alignSelf: message.from === "customer" ? "flex-end" : "flex-start",
+                  backgroundColor: message.from === "customer" ? "#EAF1EB" : "#F1F3F1", borderRadius: 12, padding: 10, maxWidth: "90%" }}>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>{message.from === "customer" ? "Вы" : "PicPac"}</Text>
+                  <Text style={{ color: colors.text }}>{message.text}</Text>
+                </View>
+              ))}
+              <TextInput value={chatDraft} onChangeText={setChatDraft} placeholder="Напишите оператору"
+                style={styles.input} multiline maxLength={2000} />
+              {orderError ? <Text style={{ color: colors.danger }}>{orderError}</Text> : null}
+              <PrimaryButton label={sendingMessage ? "Отправляем…" : "Отправить сообщение"}
+                disabled={sendingMessage || !chatDraft.trim()} onPress={sendChatMessage} />
             </View>
             <PrimaryButton
               label="Повторить заказ"
