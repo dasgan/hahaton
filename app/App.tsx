@@ -38,6 +38,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
@@ -209,7 +210,7 @@ const COVER_COLORS = [
 
 type SceneSettings = {
   backgroundColor: string;
-  lightPosition: "left" | "center" | "right";
+  lightPosition: { x: number; y: number };
   lightBrightness: number;
   filter: "none" | "warm" | "cool" | "rose";
 };
@@ -801,6 +802,32 @@ function SettingGroup({
   );
 }
 
+function HoldButton({sign, change}: {sign: number; change?: (delta: number) => void}) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const repeated = useRef(false);
+  const stop = useCallback(() => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+  }, []);
+  useEffect(() => stop, [stop]);
+  return <Pressable style={styles.stepperBtn} accessibilityRole="button"
+    accessibilityLabel={sign > 0 ? "Увеличить яркость" : "Уменьшить яркость"}
+    onPressIn={() => {
+      stop();
+      repeated.current = false;
+      const start = Date.now();
+      const repeat = () => {
+        repeated.current = true;
+        change?.(sign);
+        timer.current = setTimeout(repeat, Math.max(28, 180 - (Date.now() - start) / 10));
+      };
+      timer.current = setTimeout(repeat, 400);
+    }}
+    onPressOut={stop} onPress={() => { if (!repeated.current) change?.(sign); }}>
+    <Ionicons name={sign > 0 ? "add" : "remove"} size={20} color={colors.text} />
+  </Pressable>;
+}
+
 function Stepper({
   label,
   onMinus,
@@ -1130,6 +1157,8 @@ function ProductPreview({
   photos,
   scene,
   onSceneChange,
+  onMaterial,
+  onBrightness,
   showSceneControls = true,
   selectedSlotId,
   swapSlotId,
@@ -1141,6 +1170,8 @@ function ProductPreview({
 }: MockupProps & {
   scene: SceneSettings;
   onSceneChange: (patch: Partial<SceneSettings>) => void;
+  onMaterial?: (paper: PaperType) => void;
+  onBrightness?: (delta: number) => void;
   showSceneControls?: boolean;
   bookPage?: number;
   onBookPage?: (n: number) => void;
@@ -1376,12 +1407,14 @@ function ProductPreview({
   const rear =
     Math.cos((yaw * Math.PI) / 180) * Math.cos((pitch * Math.PI) / 180) < 0;
   const thickness = book ? (spread ? 4 : 16) : 1.5;
-  const lightDirection =
-    scene.lightPosition === "left"
-      ? [-0.55, -0.62, 0.56]
-      : scene.lightPosition === "right"
-        ? [0.55, -0.62, 0.56]
-        : [0, -0.62, 0.78];
+  const lx = (scene.lightPosition.x - 0.5) * 2;
+  const ly = (scene.lightPosition.y - 0.5) * 2;
+  const distance = Math.hypot(lx, ly, 0.78);
+  const lightDirection = [lx / distance, ly / distance, 0.78 / distance];
+  const padSize = useRef({ width: 1, height: 1 });
+  const placeLight = (x: number, y: number) => onSceneChange({
+    lightPosition: { x: clamp(x / padSize.current.width, 0, 1), y: clamp(y / padSize.current.height, 0, 1) },
+  });
   const filterTint =
     SCENE_FILTERS.find((item) => item.id === scene.filter)?.tint ??
     "transparent";
@@ -1699,6 +1732,18 @@ function ProductPreview({
         collapsable={false}
         style={[styles.viewerBounds, { backgroundColor: scene.backgroundColor }]}
       >
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, {
+          borderLeftWidth: Math.min(width * 0.12, 100), borderRightWidth: Math.min(width * 0.12, 100),
+          borderTopWidth: 40, borderBottomWidth: 62,
+          borderLeftColor: "rgba(15,29,25,0.12)", borderRightColor: "rgba(15,29,25,0.08)",
+          borderTopColor: "rgba(255,255,255,0.14)", borderBottomColor: "rgba(15,29,25,0.04)",
+        }]} />
+        <LinearGradient pointerEvents="none" start={{x:scene.lightPosition.x,y:scene.lightPosition.y}}
+          end={{x:scene.lightPosition.x < 0.5 ? 1 : 0,y:1}}
+          colors={[`rgba(255,252,238,${0.14 * scene.lightBrightness / 100})`, "transparent", "rgba(14,30,24,0.11)"]}
+          style={StyleSheet.absoluteFill} />
+        <View pointerEvents="none" style={{position:"absolute", bottom:30, alignSelf:"center", width:objectWidth * 0.83, height:12,
+          borderRadius:"50%", backgroundColor:"rgba(22,33,28,0.09)", transform:[{translateX:-lx * 24}]}} />
         <View pointerEvents="none" style={styles.objectStage}>
           <View style={{ width: objectWidth, height: objectHeight }}>
             {planes.map((plane) => {
@@ -1773,6 +1818,17 @@ function ProductPreview({
                       },
                     ]}
                   />
+                  {face && (() => {
+                    const half = [lightDirection[0], lightDirection[1], lightDirection[2] + 1];
+                    const alignment = Math.max(0, projected.normal.reduce((n, v, i) => n + v * half[i], 0) / Math.hypot(...half));
+                    const glossy = cfg.paper === "glossy";
+                    const shine = Math.min(0.85, Math.pow(alignment, glossy ? 9 : 2) * scene.lightBrightness / 100 * (glossy ? 0.85 : 0.09));
+                    const center = clamp(0.5 + (lx - projected.normal[0]) * 0.25, 0.22, 0.78);
+                    return <LinearGradient pointerEvents="none" style={StyleSheet.absoluteFill}
+                      start={{x:0,y:0.2}} end={{x:1,y:0.8}}
+                      colors={["transparent", `rgba(255,255,255,${shine})`, "transparent"]}
+                      locations={[center - 0.2, center, center + 0.2]} />;
+                  })()}
                   {scene.filter !== "none" && (
                     <View
                       pointerEvents="none"
@@ -1791,11 +1847,7 @@ function ProductPreview({
           pointerEvents="none"
           style={[
             styles.sceneLightMarker,
-            scene.lightPosition === "left"
-              ? { left: 18 }
-              : scene.lightPosition === "right"
-                ? { right: 18 }
-                : { alignSelf: "center" },
+            { left: `${3 + scene.lightPosition.x * 90}%`, top: `${3 + scene.lightPosition.y * 85}%` },
           ]}
         >
           <Ionicons
@@ -1894,36 +1946,28 @@ function ProductPreview({
         <View style={styles.sceneControls}>
           <Text style={styles.sceneControlsTitle}>3D-пространство</Text>
           <Text style={styles.sceneControlLabel}>Источник света</Text>
-          <View style={styles.sceneChoices}>
-            {([
-              ["left", "Слева"],
-              ["center", "Сверху"],
-              ["right", "Справа"],
-            ] as const).map(([position, label]) => (
-              <Chip
-                key={position}
-                label={label}
-                active={scene.lightPosition === position}
-                onPress={() => onSceneChange({ lightPosition: position })}
-              />
-            ))}
+          <Text style={styles.settingGroupHint}>Коснитесь панели или перетащите солнце</Text>
+          <View style={{ height: 78, borderRadius: 14, backgroundColor: "#EAF1EB", overflow: "hidden", touchAction:"none" } as object}
+            onLayout={e => { padSize.current = e.nativeEvent.layout; }}
+            onStartShouldSetResponder={() => true}
+            onResponderTerminationRequest={() => false}
+            onResponderGrant={e => placeLight(e.nativeEvent.locationX, e.nativeEvent.locationY)}
+            onResponderMove={e => placeLight(e.nativeEvent.locationX, e.nativeEvent.locationY)}>
+            <View pointerEvents="none" style={{position:"absolute", left:`${scene.lightPosition.x * 94}%`, top:`${scene.lightPosition.y * 69}%`}}>
+              <Ionicons name="sunny" size={24} color={colors.accent}/>
+            </View>
           </View>
           <Text style={styles.sceneControlLabel}>Яркость света</Text>
-          <Stepper
-            label={`${scene.lightBrightness}%`}
-            onMinus={() =>
-              onSceneChange({
-                lightBrightness: Math.max(0, scene.lightBrightness - 25),
-              })
-            }
-            onPlus={() =>
-              onSceneChange({
-                lightBrightness: Math.min(200, scene.lightBrightness + 25),
-              })
-            }
-            minusDisabled={scene.lightBrightness === 0}
-            plusDisabled={scene.lightBrightness === 200}
-          />
+          <View style={styles.stepper}>
+            <HoldButton sign={-1} change={onBrightness} />
+            <Text style={styles.stepperLabel}>{scene.lightBrightness}%</Text>
+            <HoldButton sign={1} change={onBrightness} />
+          </View>
+          <Text style={styles.sceneControlLabel}>Бумага</Text>
+          <View style={styles.sceneChoices}>
+            <Chip label="Матовая" active={cfg.paper === "matte"} onPress={() => onMaterial?.("matte")} />
+            <Chip label="Глянцевая" active={cfg.paper === "glossy"} onPress={() => onMaterial?.("glossy")} />
+          </View>
           <Text style={styles.sceneControlLabel}>Фильтр</Text>
           <View style={styles.sceneChoices}>
             {SCENE_FILTERS.map((filter) => (
@@ -2234,7 +2278,7 @@ function PicPacApp() {
   const [cfg, setCfg] = useState<ProductConfig>(() => makeConfig("print", []));
   const [scene, setScene] = useState<SceneSettings>({
     backgroundColor: "#EFF2EC",
-    lightPosition: "left",
+    lightPosition: { x: 0.23, y: 0.18 },
     lightBrightness: 100,
     filter: "none",
   });
@@ -3064,6 +3108,8 @@ function PicPacApp() {
               cfg={cfg}
               photos={photos}
               scene={scene}
+              onMaterial={paper => updateCfg({paper})}
+              onBrightness={delta => setScene(prev => ({...prev, lightBrightness: clamp(prev.lightBrightness + delta, 0, 200)}))}
               onSceneChange={updateScene}
               selectedSlotId={selectedSlotId}
               swapSlotId={swapSlotId}
